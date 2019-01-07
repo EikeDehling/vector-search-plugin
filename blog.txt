@@ -1,0 +1,128 @@
+# Searching with Deep Learning
+
+Recently i helped my colleague data scientists with engineering a search system based on their Deep Learning models. The
+idea is make document embeddings using a deep learning model and then use the embedding vectors in the search system to
+find similar documents. A document embedding is essentially just a (long) array of numbers and finding similar documents
+means to find other (long) arrays of numbers that are close. Close-ness can be measured for example by euclidean
+distance.
+
+What you can do with this, is find similar documents. Because it's not directly based on keywords but on "embeddings",
+you automatically get functionality comparable to synonym expansion. It will find related documents, even if they use
+different keywords.
+
+There is existing tools for such a problem, for example the FAISS library by facebook
+(https://github.com/facebookresearch/faiss). This library is very fast and supports various clever methods for searching
+fast using such embedding vectors. However this library doesn't integrate nicely with a search engine such as
+Elasticsearch.
+
+For elasticsearch there is also some plugins offering similar functionality, but they aren't nearly as fast because
+they only calculate vector similarity but don't filter (https://github.com/muhleder/elasticsearch-vector-scoring).
+
+So we engineered our own, better solution ;-)
+
+
+## Fast Nearest Neighbours
+
+For fast search usually some kind of "index" is used, a data structure that allows to efficiently filter down to the
+relevant matches without evaluating each match individualy. For searching one keywords, an "inverted index" is used. For
+searching on geo coordinates, a data structure called a KDTree is used. We will need some such mechanism that quickly
+filters down to the most relevant matches, so we only need to calculate the exact score on this smaller set. This is
+important because calculating distances with a large set of high dimensional vectors is an expensive (slow) operation.
+
+The FAISS library mentioned above allows to solve this problem in a few different ways:
+
+- Reducing dimensionality with PCA
+- KMeans clustering
+- Locality Sensitive Hashing
+- Probably more ways i don't know yet
+
+Each of these approaches enables an efficient indexing approach, where you can quickly filter down to the near-ish
+neighbours and then calculate exact distances to find the nearest neighbours.  After dimensionality reduction, one can
+use a KDTree, after clustering or Locality Sensitive Hashing an inverted index.
+
+This plot shows how filtering down the dataset speeds up computation (size_vs_time.png)
+
+All of these approaches can potentially be implemented in Elasticsearch as wel of course. The advantage that gives is
+easy integration with the rest of the search system. You can then combine queries based on keywords or any other
+criteria with the Deep Learning results.
+
+Experimentation showed that on our dataset, the combination of reducing dimensions with PCA and then indexing with a
+KDTree gives us the best combination of speed and accuracy.
+
+This plot shows how filtering down the dataset affects result accuracy (size_vs_overlap.png)
+
+
+## Elasticsearch Plugin
+
+In the lucene library, the basis of elasticsearch, the KDTree data structure is already available. It's not exposed yet
+by the elasticsearch api. For calculating exact vector distance there is already plugins, so we only needed to build
+a small plugin that allows using this index data structure. (https://github.com/EikeDehling/vector-search-plugin)
+
+
+## Plugging things together
+
+Making it all work together is now just matter of putting the puzzle pieces together in the right order.
+
+- Install the Elasticsearch plugins
+- PCA for dimensionality reduction
+- Index the reduced and full vectors in Elasticsearch (together with other document fields)
+- Ready to go! ;-)
+
+To install the plugin and create the index, please see here: https://github.com/EikeDehling/vector-search-plugin .
+Preprocessing data with PCA can be done for example in python with sklearn or in java with Smile library.
+
+Indexing your data is also pretty easy:
+
+```
+full_vector = [0.0, 0.0, ....]  # Full length vector
+pca_reduced_vector = [0.0, 0.0, ....]  # 8 dimensional reduced vector
+
+es.index(INDEX, DOC_TYPE, {
+  "full_vector": base64.b64encode(np.array(full_vector).astype(np.dtype('>f8'))).decode("utf-8"),
+  "pca_reduced_vector": ",".join([str(x) for x in pca_reduced_vector]),
+  "description": "Some keywords here",
+})
+```
+
+Now you're ready to start searching. For an example, see below. Notice the range query on the pca_reduced_vector,
+that's what our new plugin does. The script_score part is from the other plugin.
+
+
+```
+POST my_index/_search
+{
+  "query": {
+    "function_score": {
+      "query": {
+        "range": {
+          "pca_reduced_vector": {
+            "from": "-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5",
+            "to": "0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5"
+          }
+        }
+      },
+      "functions": [
+        {
+          "script_score": {
+            "script": {
+              "inline": "vector_scoring",
+              "lang": "binary_vector_score",
+              "params": {
+                "vector_field": "full_vector",
+                "vector": [ 0.0, 0.0716, 0.1761, 0.0, 0.0779, 0.0, 0.1382, 0.3729 ]
+              }
+            }
+          }
+        }
+      ],
+      "boost_mode": "replace"
+    }
+  },
+  "size": 10
+}
+```
+
+
+## Thanks for reading!
+
+I hope you enjoyed, if you have questions, let me know!
