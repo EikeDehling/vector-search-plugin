@@ -7,7 +7,7 @@
     <fileSets>
         <fileSet>
             <directory>elasticsearch</directory>
-            <outputDirectory>elasticsearch</outputDirectory>
+            <outputDirectory></outputDirectory>
             <includes>
                 <include>plugin-descriptor.properties</include>
             </includes>
@@ -16,7 +16,7 @@
     <includeBaseDirectory>false</includeBaseDirectory>
     <dependencySets>
         <dependencySet>
-            <outputDirectory>elasticsearch</outputDirectory>
+            <outputDirectory></outputDirectory>
             <useProjectArtifact>true</useProjectArtifact>
             <useTransitiveFiltering>true</useTransitiveFiltering>
             <excludes>
