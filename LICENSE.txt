@@ -1,4 +1,4 @@
-Copyright 2018 Eike Dehling
+Copyright 2018 Textkernel BV
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not
 use anything in this git repository except in compliance with the License.
